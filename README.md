@@ -1,2 +1,416 @@
-# library-management.new
-Spring Boot 圖書館管理系統 - 原生 JDBC + ACID 交易控制
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖書館雲端管理系統 - 作品集展示</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f4f6f9 0%, #e9ecef 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            letter-spacing: 1px;
+            font-size: 1.3em;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border-radius: 10px;
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0,0,0,0.1);
+        }
+        .nav-tabs {
+            border-bottom: 2px solid #dee2e6;
+        }
+        .nav-tabs .nav-link {
+            color: #495057;
+            font-weight: 500;
+            border: none;
+            border-bottom: 3px solid transparent;
+        }
+        .nav-tabs .nav-link:hover {
+            border-bottom-color: #0d6efd;
+        }
+        .nav-tabs .nav-link.active {
+            font-weight: bold;
+            color: #0d6efd;
+            border-bottom-color: #0d6efd;
+            background-color: transparent;
+        }
+        .table-hover tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+        .badge {
+            padding: 0.5em 0.75em;
+            font-weight: 500;
+        }
+        .btn-outline-primary {
+            transition: all 0.2s;
+        }
+        .btn-outline-primary:hover {
+            transform: scale(1.05);
+        }
+        .card-title {
+            color: #212529;
+            font-weight: 600;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e9ecef;
+        }
+        .alert {
+            border: none;
+            border-left: 4px solid;
+        }
+        .alert-success {
+            border-left-color: #198754;
+            background-color: #d1e7dd;
+        }
+        .alert-danger {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .alert-warning {
+            border-left-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        .alert-info {
+            border-left-color: #0dcaf0;
+            background-color: #cfe2ff;
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-5">
+    <div class="container">
+        <a class="navbar-brand" href="#">📚 Cloud Library System</a>
+        <span class="navbar-text text-light-50">原生 JDBC + 本地端測試與 AWS RDS 資料庫展示</span>
+    </div>
+</nav>
+
+<div class="container">
+    <div id="alertContainer"></div>
+
+    <ul class="nav nav-tabs mb-4" id="consoleTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="reader-tab" data-bs-toggle="tab" data-bs-target="#readerConsole" type="button" role="tab">
+                👤 讀者操作端主控台
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="admin-tab" data-bs-toggle="tab" data-bs-target="#adminConsole" type="button" role="tab">
+                ⚙️ 系統管理員主控台
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="consoleTabContent">
+
+        <div class="tab-pane fade show active" id="readerConsole" role="tabpanel">
+            <div class="row">
+                <div class="col-md-12 mb-4">
+                    <div class="card p-4">
+                        <h5 class="card-title mb-3">🔍 線上圖書即時檢索 (防 SQL 注入模糊查詢)</h5>
+
+                        <div class="input-group mb-4">
+                            <input
+                                    type="text"
+                                    id="searchKeyword"
+                                    class="form-control"
+                                    placeholder="請輸入書名或作者關鍵字..."
+                                    onkeypress="if(event.key==='Enter') loadBooks()">
+                            <button
+                                    class="btn btn-primary"
+                                    type="button"
+                                    onclick="loadBooks()">
+                                🔎 搜尋書籍
+                            </button>
+                            <button
+                                    class="btn btn-outline-secondary"
+                                    type="button"
+                                    onclick="resetSearch()">
+                                🔄 重置
+                            </button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>書籍名稱</th>
+                                    <th>作者</th>
+                                    <th>ISBN 碼</th>
+                                    <th>目前狀態</th>
+                                    <th>操作</th>
+                                </tr>
+                                </thead>
+                                <tbody id="bookTableBody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        點擊「搜尋書籍」按鈕或輸入關鍵字載入資料...
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="alert alert-info mt-3 mb-0">
+                            <strong>💡 使用提示：</strong><br>
+                            ✓ 在上方搜尋框輸入書籍名稱或作者，系統會執行「防 SQL 注入」的模糊查詢<br>
+                            ✓ 點擊「點擊借閱」按鈕，系統將手動開啟 ACID 交易，自動以讀者 Bob (ID: 2) 借書<br>
+                            ✓ 借書成功後，表格會自動刷新，展示最新的書籍狀態
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="adminConsole" role="tabpanel">
+            <div class="row">
+                <div class="col-md-12 mb-4">
+                    <div class="card p-4">
+                        <h5 class="card-title mb-3">🛠️ 後台環境與測試資料說明</h5>
+                        <p class="text-muted">
+                            此介面供面試官動態驗證資料庫的 <strong>ACID 交易特性</strong>。你可以切換至讀者端點擊借書，
+                            系統將手動關閉 autoCommit 執行底層三個連續動作。若雲端資料庫更新成功，
+                            重新整理此處或 DBeaver 即可同步看見最新的變更狀態。
+                        </p>
+                    </div>
+                </div>
+
+                <div class="col-md-6 mb-4">
+                    <div class="card p-4">
+                        <h5 class="card-title mb-3">👥 模擬讀者測試帳號</h5>
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <h6 class="mb-1">Alan (管理員)</h6>
+                                <p class="mb-0">
+                                    <code>ID: 1</code>
+                                    <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+                                </p>
+                            </div>
+                            <div class="list-group-item">
+                                <h6 class="mb-1">Bob (讀者)</h6>
+                                <p class="mb-0">
+                                    <code>ID: 2</code>
+                                    <span class="badge bg-info">READER</span>
+                                </p>
+                            </div>
+                            <div class="list-group-item">
+                                <h6 class="mb-1">Charlie (讀者)</h6>
+                                <p class="mb-0">
+                                    <code>ID: 3</code>
+                                    <span class="badge bg-info">READER</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6 mb-4">
+                    <div class="card p-4">
+                        <h5 class="card-title mb-3">🏗️ 系統技術棧</h5>
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <strong>後端框架</strong><br>
+                                Spring Boot 3.x + 原生 JDBC
+                            </div>
+                            <div class="list-group-item">
+                                <strong>資料庫</strong><br>
+                                AWS RDS MySQL 8.0 + 手動交易控制
+                            </div>
+                            <div class="list-group-item">
+                                <strong>API 架構</strong><br>
+                                RESTful API + 全域異常處理
+                            </div>
+                            <div class="list-group-item">
+                                <strong>前端框架</strong><br>
+                                Vanilla JavaScript + Bootstrap 5
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-12 mb-4">
+                    <div class="card p-4">
+                        <h5 class="card-title mb-3">🔒 ACID 交易特性展示</h5>
+                        <div class="row">
+                            <div class="col-md-3 mb-3">
+                                <div class="p-3 border rounded-3 bg-light">
+                                    <h6 class="text-success mb-2">A - 原子性</h6>
+                                    <small>借書操作包含檢查庫存、更新狀態、插入紀錄，全部成功才提交，任一失敗全回滾。</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <div class="p-3 border rounded-3 bg-light">
+                                    <h6 class="text-primary mb-2">C - 一致性</h6>
+                                    <small>透過外鍵約束與狀態檢驗，確保借閱紀錄與書籍庫存狀態永遠處於合法對應關係。</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <div class="p-3 border rounded-3 bg-light">
+                                    <h6 class="text-warning mb-2">I - 隔離性</h6>
+                                    <small>使用 MySQL 預設可重複讀 (RR) 隔離級別，防止多執行緒高併發下的髒讀與搶書衝突。</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <div class="p-3 border rounded-3 bg-light">
+                                    <h6 class="text-danger mb-2">D - 持久性</h6>
+                                    <small>一旦交易順利 Transaction Commit，所有變更將立刻寫入 AWS RDS 雲端固態硬碟硬化保存。</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // 網頁載入完成後自動撈取全部書籍
+    document.addEventListener("DOMContentLoaded", function() {
+        loadBooks();
+    });
+
+    // 核心：非同步發送 Fetch 請求載入書籍清單
+    function loadBooks() {
+        const keyword = document.getElementById("searchKeyword").value.trim();
+        // 使用相對路徑，後端 Spring Boot 跑在哪，API 就自動抓哪
+        let url = '/api/books';
+        if (keyword) {
+            url += `?keyword=${encodeURIComponent(keyword)}`;
+        }
+
+        const tbody = document.getElementById("bookTableBody");
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm" role="status"></div> 正在連線 AWS 資料庫...</td></tr>`;
+
+        fetch(url)
+            .then(response => {
+                if (!response.ok) throw new Error("後端伺服器回應錯誤");
+                return response.json();
+            })
+            .then(books => {
+                tbody.innerHTML = "";
+                if (books.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">❌ 找不到任何符合條件的書籍。</td></tr>`;
+                    return;
+                }
+
+                books.forEach(book => {
+                    const tr = document.createElement("tr");
+
+                    // 根據書籍狀態渲染不同的 Badge
+                    let statusBadge = '';
+                    let actionButton = '';
+
+                    if (book.status === 'AVAILABLE') {
+                        statusBadge = '<span class="badge bg-success">可借閱</span>';
+                        actionButton = `<button class="btn btn-sm btn-outline-primary" onclick="borrowBook(${book.id}, '${book.title}')">📖 點擊借閱</button>`;
+                    } else if (book.status === 'BORROWED') {
+                        statusBadge = '<span class="badge bg-secondary">已借出</span>';
+                        actionButton = `<button class="btn btn-sm btn-light" disabled>已借出</button>`;
+                    } else {
+                        statusBadge = `<span class="badge bg-warning text-dark">${book.status}</span>`;
+                        actionButton = `<button class="btn btn-sm btn-light" disabled>無法操作</button>`;
+                    }
+
+                    tr.innerHTML = `
+                        <td><strong>${book.id}</strong></td>
+                        <td>${escapeHtml(book.title)}</td>
+                        <td>${escapeHtml(book.author)}</td>
+                        <td><code class="text-dark">${escapeHtml(book.isbn)}</code></td>
+                        <td>${statusBadge}</td>
+                        <td>${actionButton}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(error => {
+                console.error("Error loading books:", error);
+                showAlert("無法載入資料庫書籍，請確認本地端 Spring Boot 專案已順利啟動！", "danger");
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">⚠️ 資料載入失敗，請檢查 API 連線。</td></tr>`;
+            });
+    }
+
+    // 核心：非同步點擊借書 (呼叫後端手動關閉 autoCommit 的多表 ACID 交易)
+    function borrowBook(bookId, bookTitle) {
+        // 模擬當前登入讀者為 Bob (ID: 2)
+        const userId = 2;
+        const url = `/api/books/borrow?bookId=${bookId}&userId=${userId}`;
+
+        showAlert(`正在為您申請借閱《${bookTitle}》，請稍候...`, "warning");
+
+        fetch(url, { method: 'POST' })
+            .then(response => {
+                if (response.ok) {
+                    return response.text().then(text => {
+                        showAlert(`🎉 借閱成功！《${bookTitle}》已成功借出。AWS RDS 交易已手動提交 (Commit)！`, "success");
+                        loadBooks(); // 重新整理表格
+                    });
+                } else {
+                    return response.text().then(errText => {
+                        throw new Error(errText || "借閱失敗，可能已被他人捷足先登");
+                    });
+                }
+            })
+            .catch(error => {
+                console.error("Error borrowing book:", error);
+                showAlert(`❌ 借閱失敗原因：${error.message}`, "danger");
+            });
+    }
+
+    // 重置搜尋
+    function resetSearch() {
+        document.getElementById("searchKeyword").value = "";
+        loadBooks();
+    }
+
+    // 全局動態 Alert 通知元件
+    function showAlert(message, type) {
+        const alertContainer = document.getElementById("alertContainer");
+        const alertId = 'alert_' + Date.now();
+
+        alertContainer.innerHTML = `
+            <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `;
+
+        // 5 秒後自動讓提示消失
+        setTimeout(() => {
+            const alertEl = document.getElementById(alertId);
+            if (alertEl) {
+                const bsAlert = new bootstrap.Alert(alertEl);
+                bsAlert.close();
+            }
+        }, 5000);
+    }
+
+    // 防止 XSS 攻擊的安全過濾函數
+    function escapeHtml(string) {
+        return String(string).replace(/[&<>"']/g, function (s) {
+            return {
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            }[s];
+        });
+    }
+</script>
+
+</body>
+</html>
